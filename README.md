@@ -14,8 +14,8 @@ Decryption requires either Wireshark 4.5 (untested) or that you install [luagcry
 
 Unifi devices encrypt syslog and INFORM messages using a device-specific key.
 Use the
-`[get-inform-key.sh](get-inform-key.sh)`
-`[get-syslog-key.sh](get-syslog-key.sh)`
+[`get-inform-key.sh`](get-inform-key.sh)
+[`get-syslog-key.sh`](get-syslog-key.sh)
 scripts to retrieve these from the devices that use SSH.
 There may be better ways of doing this.
 
