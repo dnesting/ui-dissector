@@ -23,6 +23,19 @@
 -- SOFTWARE.
 --
 
+-- This is an implementation of a JSON decoder that retains TvbRanges.
+-- The resulting decoded values are callables that return
+-- (TvbRange, value) pairs, which can be unpacked into a tree:add statement like:
+--
+--   jsond = require("jsond")
+--   json_bytes = ByteArray.new('{"field1": "value1"}', true)
+--   json_tvb_range = json_bytes:tvb("Test Data")()
+--   instance = jsond.decode(json_tvb_range)
+--
+--   tree:add(fields.my_field1, instance.field1())
+--   -- equivalent to:
+--   tree:add(fields.my_field1, jsond.range(instance), jsond.value(instance))
+
 local jsond = { _version = "0.0.1" }
 
 local escape_char_map = {
@@ -522,6 +535,28 @@ function jsond.decode(tvbr)
     decode_error(tvbr, idx, "trailing garbage")
   end
   return res
+end
+
+-- range obtains the TvbRange in the JSON instance.
+-- Most JSON instance types also have a :range() method, but
+-- the Object type may have this shadowed by a field.
+-- This function is guaranteed to work with all instance types.
+function jsond.range(value)
+  if value and value._range then
+    return value._range
+  end
+  error("jsond.range() called on non-Value object")
+end
+
+-- value obtains the underlying value in the JSON instance.
+-- Most JSON instance types also have a :val() method, but
+-- the Object type may have this shadowed by a field.
+-- This function is guaranteed to work with all instance types.
+function jsond.value(value)
+  if value and value._val then
+    return value._val
+  end
+  error("jsond.value() called on non-Value object")
 end
 
 return jsond

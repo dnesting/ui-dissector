@@ -5,10 +5,14 @@ set_plugin_info({
     repository = "https://github.com/dnesting/ui-dissector",
 })
 
-local gcrypt_ok, gcrypt = pcall(require, "luagcrypt")
-if not gcrypt_ok then
-    gcrypt = nil
+local gcrypt
+if GcryptCipher then
+    encryption_supported = true
+else
+    local gcrypt_ok
+    gcrypt_ok, gcrypt = pcall(require, "luagcrypt")
 end
+local encryption_ok = GcryptCipher or gcrypt
 
 local ui_syslog_proto = Proto("UISYSLOG", "Ubiquiti Syslog Protocol")
 
@@ -18,11 +22,11 @@ local fields = {
     version       = ProtoField.uint8("uisyslog.version", "Version", base.DEC),
     unknown       = ProtoField.uint8("uisyslog.unknown", "Unknown", base.DEC),
     device_hashid = ProtoField.bytes("uisyslog.hashid", "Device HashID"),
-    iv            = ProtoField.bytes("uisyslog.iv", "GCM IV"),
-    aad           = ProtoField.bytes("uisyslog.aad", "GCM AAD"),
-    ciphertext    = ProtoField.bytes("uisyslog.ciphertext", "Ciphertext"),
-    tag           = ProtoField.bytes("uisyslog.tag", "GCM Tag"),
-    plain         = ProtoField.string("uisyslog.plain", "Decrypted Line", base.ASCII),
+    iv            = ProtoField.bytes("uisyslog.gcm.iv", "GCM IV"),
+    aad           = ProtoField.bytes("uisyslog.gcm.aad", "GCM AAD"),
+    ciphertext    = ProtoField.bytes("uisyslog.gcm.ciphertext", "Ciphertext"),
+    tag           = ProtoField.bytes("uisyslog.gcm.tag", "GCM Tag"),
+    plain         = ProtoField.string("uisyslog.line", "Decrypted Line", base.ASCII),
 }
 ui_syslog_proto.fields = fields
 
@@ -62,11 +66,20 @@ local function get_syslog_key(mac_addr_tvb)
 end
 
 local function decrypt_gcm(key, iv, ciphertext, ad, tag)
-    local aes = gcrypt.Cipher(gcrypt.CIPHER_AES256, gcrypt.CIPHER_MODE_GCM)
-    aes:setkey(key)
-    aes:setiv(iv)
-    aes:authenticate(ad)
-    local plaintext = aes:decrypt(ciphertext)
+    local aes, plaintext
+    if GcryptCipher then
+        aes = GcryptCipher(GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_GCM, 0)
+        aes:setkey(key)
+        aes:setiv(iv)
+        aes:authenticate(ad)
+        plaintext = aes:decrypt(nil, ciphertext)
+    else
+        aes = gcrypt.Cipher(gcrypt.CIPHER_AES256, gcrypt.CIPHER_MODE_GCM)
+        aes:setkey(key)
+        aes:setiv(iv)
+        aes:authenticate(ad)
+        plaintext = aes:decrypt(ciphertext)
+    end
 
     local ok, err = pcall(function()
         aes:checktag(tag)
@@ -75,7 +88,7 @@ local function decrypt_gcm(key, iv, ciphertext, ad, tag)
     return plaintext, ok, err
 end
 
-function is_printable(s)
+local function is_printable(s)
     for i = 1, #s do
         local byte = string.byte(s, i)
         if byte > 127 then

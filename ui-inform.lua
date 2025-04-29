@@ -5,10 +5,15 @@ set_plugin_info({
     repository = "https://github.com/dnesting/ui-dissector",
 })
 
-local gcrypt_ok, gcrypt = pcall(require, "luagcrypt")
-if not gcrypt_ok then
-    gcrypt = nil
+local gcrypt
+if GcryptCipher then
+    encryption_supported = true
+else
+    local gcrypt_ok
+    gcrypt_ok, gcrypt = pcall(require, "luagcrypt")
 end
+local encryption_ok = GcryptCipher or gcrypt
+
 local json_ok, json = pcall(require, "jsond")
 if not json_ok then
     json = nil
@@ -96,19 +101,37 @@ local function get_inform_key(mac_addr_tvb)
 end
 
 local function decrypt_cbc(key, iv, ciphertext)
-    local aes = gcrypt.Cipher(gcrypt.CIPHER_AES128, gcrypt.CIPHER_MODE_CBC)
+    local aes
+    if GcryptCipher then
+        aes = GcryptCipher(GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CBC, 0)
+        aes:setkey(key)
+        aes:setiv(iv)
+        return aes:decrypt(nil, ciphertext)
+    end
+    aes = gcrypt.Cipher(gcrypt.CIPHER_AES128, gcrypt.CIPHER_MODE_CBC)
     aes:setkey(key)
     aes:setiv(iv)
-    local plaintext = aes:decrypt(ciphertext)
-    return plaintext
+    return aes:decrypt(ciphertext)
 end
 
 local function decrypt_gcm(key, iv, ciphertext, ad, tag)
-    local aes = gcrypt.Cipher(gcrypt.CIPHER_AES128, gcrypt.CIPHER_MODE_GCM)
+    -- local aes = gcrypt.Cipher(gcrypt.CIPHER_AES128, gcrypt.CIPHER_MODE_GCM)
+    local aes
+    if GcryptCipher then
+        aes = GcryptCipher(GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_GCM, 0)
+    else
+        aes = gcrypt.Cipher(gcrypt.CIPHER_AES128, gcrypt.CIPHER_MODE_GCM)
+    end
     aes:setkey(key)
     aes:setiv(iv)
     aes:authenticate(ad)
-    local plaintext = aes:decrypt(ciphertext)
+    local plaintext
+
+    if GcryptCipher then
+        plaintext = aes:decrypt(nil, ciphertext)
+    else
+        plaintext = aes:decrypt(ciphertext)
+    end
 
     local ok, err = pcall(function()
         aes:checktag(tag)
@@ -117,13 +140,8 @@ local function decrypt_gcm(key, iv, ciphertext, ad, tag)
     return plaintext, ok, err
 end
 
-local function md5(data)
-    local md = gcrypt.Hash(gcrypt.MD_MD5)
-    md:write(data)
-    return md:read()
-end
-
-local default_key = md5("ubnt")
+-- md5('ubnt')
+local default_key = ByteArray.new("ba86f2bbe107c7c57eb5f2690775c712"):raw()
 
 function ui_inform_proto.dissector(buf, pinfo, tree)
     if buf:len() < 40 then
@@ -165,8 +183,9 @@ function ui_inform_proto.dissector(buf, pinfo, tree)
 
     if (flags & 0x01) ~= 0 then
         -- encrypted
-        if not gcrypt then
-            subtree:add_expert_info(PI_DECRYPTION, PI_INFO, "decrypt: luagcrypt not installed")
+        if not encryption_ok then
+            subtree:add_expert_info(PI_DECRYPTION, PI_INFO,
+                "decrypt: neither GcryptCipher nor luagcrypt installed, cannot decrypt")
             return
         end
 
