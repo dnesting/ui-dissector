@@ -1,10 +1,10 @@
 # Ubiquiti Wireshark Dissectors
 
-These are a collection of Wireshark dissectors for:
+These are a collection of Wireshark dissectors, including decryption, for:
 
-1. Dissecting (including decryption) of the Syslog messages on UDP port 5514
-2. Dissection (including decryption) of the INFORM messages on HTTP port 8080
-3. Dissection of the UI discovery messages on UDP port 10001
+1. Syslog messages on UDP port 5514
+2. INFORM messages on HTTP port 8080
+3. Discovery messages on UDP port 10001
 
 # Decryption
 
