@@ -1,3 +1,7 @@
+test: 
+	lua test/test_json_de.lua
+.PHONY: test
+
 all: json.lua ui-inform-keys.txt ui-syslog-keys.txt
 
 json.lua:

@@ -232,17 +232,19 @@ end
 field.field_iface_mac = ProtoField.ether("uidisc.field.interface.mac", "Interface MAC Address")
 field.field_iface_ip4 = ProtoField.ipv4("uidisc.field.interface.addr", "Interface IPv4 address")
 field.field_iface_config = ProtoField.string("uidisc.field.interface.config", "Interface configuration")
+field.field_iface_name = ProtoField.string("uidisc.field.interface.name", "Interface name")
 handlers[0x32] = function(buf, st, annotate)
     annotate("Interface Configuration")
     st:add(field.field_iface_mac, buf(0, 6))
     st:add(field.field_iface_ip4, buf(6, 4))
     local payload = buf(10, buf:len() - 10)
     st:add(field.field_iface_config, payload)
-    local json_ok, json = pcall(require, "json")
+    local json_ok, json = pcall(require, "jsond")
     if json_ok then
-        local iface = json.decode(payload:string())
+        local iface = json.decode(payload)
         if iface and iface.name then
-            st:append_text(" (" .. iface.name .. ")")
+            st:add(field.field_iface_name, iface.name())
+            st:append_text(" (" .. tostring(iface.name) .. ")")
         end
     else
         st:add_expert_info(PI_UNDECODED, PI_CHAT, "json module not found, unable to decode interface configuration")

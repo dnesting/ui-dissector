@@ -9,7 +9,7 @@ local gcrypt_ok, gcrypt = pcall(require, "luagcrypt")
 if not gcrypt_ok then
     gcrypt = nil
 end
-local json_ok, json = pcall(require, "json")
+local json_ok, json = pcall(require, "jsond")
 if not json_ok then
     json = nil
 end
@@ -135,7 +135,7 @@ function ui_inform_proto.dissector(buf, pinfo, tree)
     end
 
     pinfo.cols.protocol = ui_inform_proto.name
-    local subtree = tree:add(ui_inform_proto, buf(), "Ubiquiti INFORM Protocol")
+    local subtree = tree:add(ui_inform_proto, buf(), "Ubiquiti INFORM Message")
     subtree:add(fields.magic, buf(0, 4))
     subtree:add(fields.version, buf(4, 4))
     local mac = buf(8, 6)
@@ -232,50 +232,57 @@ function ui_inform_proto.dissector(buf, pinfo, tree)
     if payload_version == 1 and payload(0, 1):string() == "{" then
         subtree:add(fields.json, payload())
         if json then
-            local inst = json.decode(payload:raw())
+            local inst = json.decode(payload)
             if inst then
                 local jtree = subtree -- subtree:add("Fields")
-                if inst["hostname"] then jtree:add(fields.field_hostname, inst["hostname"]) end
-                if inst["model"] then jtree:add(fields.field_model, inst["model"]) end
-                if inst["model_display"] then jtree:add(fields.field_model_disp, inst["model_display"]) end
-                if inst["serial"] then jtree:add(fields.field_serial, inst["serial"]) end
-                if inst["version"] then jtree:add(fields.field_version, inst["version"]) end
-                if inst["cfgversion"] then jtree:add(fields.field_cfgversion, inst["cfgversion"]) end
-                if inst["mac"] then jtree:add(fields.field_mac, Address.ether(inst["mac"])) end
-                if inst["ip"] then jtree:add(fields.field_ipv4, Address.ipv4(inst["ip"])) end
+                if inst["hostname"] then jtree:add(fields.field_hostname, inst["hostname"]()) end
+                if inst["model"] then jtree:add(fields.field_model, inst["model"]()) end
+                if inst["model_display"] then jtree:add(fields.field_model_disp, inst["model_display"]()) end
+                if inst["serial"] then jtree:add(fields.field_serial, inst["serial"]()) end
+                if inst["version"] then jtree:add(fields.field_version, inst["version"]()) end
+                if inst["cfgversion"] then jtree:add(fields.field_cfgversion, inst["cfgversion"]()) end
+                if inst["mac"] then jtree:add(fields.field_mac, inst["mac"]:ether()) end
+                if inst["ip"] then jtree:add(fields.field_ipv4, inst["ip"]:ipv4()) end
                 if inst["ipv6"] then
                     for i, v in ipairs(inst["ipv6"]) do
-                        jtree:add(fields.field_ipv6, Address.ipv6(v))
+                        jtree:add(fields.field_ipv6, v:ipv6())
                     end
                 end
-                if inst["uptime"] then jtree:add(fields.field_uptime, inst["uptime"]) end
+                if inst["uptime"] then jtree:add(fields.field_uptime, inst["uptime"]()) end
                 if inst["time"] then
-                    local time = inst["time"]
-                    jtree:add(fields.field_time, NSTime.new(time, 0))
+                    jtree:add(fields.field_time, inst["time"]:time())
                 end
                 if inst["server_time_in_utc"] then
-                    local time = inst["server_time_in_utc"]
-                    jtree:add(fields.field_server_time, NSTime.new(math.floor(time / 1000), time % 1000 * 1000000))
+                    local stime = inst["server_time_in_utc"]
+                    if json.type(stime) == "string" then
+                        stime = stime:number()
+                    end
+                    if json.type(stime) == "number" then
+                        jtree:add(fields.field_server_time, stime:time())
+                    else
+                        jtree:add_expert_info(PI_MALFORMED, PI_WARN,
+                            "server_time_in_utc is not a number")
+                    end
                 end
                 if inst["isolated"] ~= nil then
-                    jtree:add(fields.field_isolated, inst["isolated"])
+                    jtree:add(fields.field_isolated, inst["isolated"]())
                 end
 
                 if inst["model"] or inst["model_display"] or inst["hostname"] or inst["isolated"] then
                     pinfo.cols.info:append(", INFORM(")
                     local started = false
                     if inst["model_display"] or inst["model"] then
-                        pinfo.cols.info:append(inst["model_display"] or inst["model"])
+                        pinfo.cols.info:append(tostring(inst["model_display"] or inst["model"]))
                         started = true
                     end
                     if inst["hostname"] then
                         if started then
                             pinfo.cols.info:append(", ")
                         end
-                        pinfo.cols.info:append(inst["hostname"])
+                        pinfo.cols.info:append(tostring(inst["hostname"]))
                         started = true
                     end
-                    if inst["isolated"] then
+                    if inst["isolated"] and inst["isolated"]:val() then
                         if started then
                             pinfo.cols.info:append(", ")
                         end

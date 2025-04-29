@@ -1,5 +1,5 @@
 --
--- json_de.lua
+-- jsond.lua
 --
 -- Copyright (c) 2025 David Nesting
 -- Copyright (c) 2020 rxi
@@ -23,7 +23,7 @@
 -- SOFTWARE.
 --
 
-local json_de = { _version = "0.0.1" }
+local jsond = { _version = "0.0.1" }
 
 local escape_char_map = {
   ["\\"] = "\\",
@@ -52,81 +52,133 @@ end
 -- Decode
 -------------------------------------------------------------------------------
 
-Value = {}
+function jsond.type(obj)
+  if obj.__json_type then
+    return obj.__json_type
+  end
+  if obj and obj.__get_json_type then
+    return obj:__get_json_type()
+  end
+  error("type() called on non-Value object")
+end
+
+local Value = {}
 Value.__index = Value
+Value.__name = "Value"
 
 function Value:new(value, range)
+  if type(value) ~= "number" and type(value) ~= "nil" and type(value) ~= "boolean" then
+    error("Value:new() expected number, nil or boolean, got " .. typename(value))
+  end
   local obj = setmetatable({}, self)
   obj._range = range
   obj._val = value
   return obj
 end
 
-function Value:__tostring()
-  return tostring(self._val)
+function Value:__get_json_type()
+  local v = self:val()
+  if type(v) == "number" then
+    return "number"
+  elseif type(v) == "boolean" then
+    return "boolean"
+  elseif v == nil then
+    return "null"
+  else
+    error("Value:__get_json_type() called on non-Value object")
+  end
 end
 
-function Value:range()
-  return self._range
+function Value:__tostring() return tostring(self._val) end
+
+function Value:__call() return self._range, self._val end
+
+function Value:type() return jsond.type(self) end
+
+function Value:val() return self._val end
+
+function Value:range() return self._range end
+
+function Value:time()
+  local val = self:val()
+  if type(val) == "number" then
+    local secs, nsecs = math.modf(val)
+    return self._range, NSTime.new(secs, nsecs * 1e9)
+  end
+  return nil
 end
 
-function Value:val()
-  return self._val
-end
+function Value:raw() return self._range:raw() end
 
 local String = {}
 String.__index = String
+String.__name = "String"
+String.__json_type = "string"
+String.__tostring = Value.__tostring
+String.__call = Value.__call
+String.type = Value.type
+String.val = Value.val
 
 function String:new(value, range)
+  if type(value) ~= "string" then
+    error("String:new() expected string, got " .. typename(value))
+  end
   local obj = setmetatable({}, self)
-  obj._range = range
   obj._val = value
+  obj._range = range
   return obj
 end
 
-function String:__tostring()
-  return self._val
+function String:range(a, b) return self._range(a, b) end
+
+function String:string() return self._val end
+
+function String:__len() return #self:val() end
+
+function String:ether() return self:range(), Address.ether(self:val()) end
+
+function String:ipv4() return self:range(), Address.ipv4(self:val()) end
+
+function String:ipv6() return self:range(), Address.ipv6(self:val()) end
+
+function String:number()
+  -- converts the number inside string to an actual number Value
+  local val = self:val()
+  local n = tonumber(val)
+  if n then
+    return Value:new(n, self:range())
+  end
+  return nil
 end
 
-function String:range(a, b)
-  return self._range(a, b)
-end
-
-function String:val()
-  return self._val
+function String:time()
+  return self:number():time()
 end
 
 local parse_string0
 
-function String:sub(a, b)
-  local r = self:range()
-  local _, ra = parse_string0(r, 0, a)
-  local _, rb = parse_string0(r, ra, b - a)
-  return Value:new(self:range(ra, rb), self:val():sub(a, b))
-end
-
-local xxx = 0
-
-function String:__index(key)
-  if String[key] then
-    return String[key]
+function String:sub(str_start, str_end)
+  local range = self:range()
+  local rng_before = 0
+  if str_start > 1 then
+    _, rng_before = parse_string0(range, 0, str_start)
   end
-
-  xxx = xxx + 1
-  if xxx > 4 then
-    print(debug.traceback())
-    os.exit(1)
-  end
-  return String:new(self:range(key - 1, 1), self:val():sub(key, key))
+  local _, rng_size = parse_string0(range, rng_before, str_end - str_start + 1)
+  rng_size = rng_size - 1
+  return String:new(self:val():sub(str_start, str_end), range(rng_before, rng_size))
 end
 
 local Object = {}
 Object.__index = Object
+Object.__name = "Object"
+Object.__json_type = "object"
+Object.__tostring = Value.__tostring
+Object.__call = Value.__call
 
 function Object:new(value, range)
   local obj = setmetatable({}, self)
-  rawset(obj, "_val", {})
-  rawset(obj, "_range", range)
+  obj._val = {}
+  obj._range = range
   if value and type(value) == "table" then
     for k, v in pairs(value) do
       obj[k] = v
@@ -135,18 +187,15 @@ function Object:new(value, range)
   return obj
 end
 
-function Object:range() return rawget(self, "_range") end
-
-function Object:val() return rawget(self, "_val") end
-
 function Object:__pairs() return pairs(self:val()) end
 
 function Object:__index(key)
-  local class_field = rawget(Object, key)
-  if class_field then
-    return class_field
+  -- if key starts with _ then only retrieve from the object
+  if key:sub(1, 1) == "_" then
+    return rawget(self, key)
   end
-  local obj = rawget(self, "_val")
+
+  obj = rawget(self, "_val")
   local found = obj[key]
   if found then
     return found
@@ -156,45 +205,63 @@ function Object:__index(key)
       return v
     end
   end
-  return nil
+
+  return rawget(self, key)
 end
 
 function Object:__newindex(key, value)
+  if key:sub(1, 1) == "_" then
+    return rawset(self, key, value)
+  end
   rawget(self, "_val")[key] = value
 end
 
 local Array = {}
 Array.__index = Array
+Array.__name = "Array"
+Array.__json_type = "array"
+Array.__tostring = Value.__tostring
+Array.__call = Value.__call
 
 function Array:new(value, range)
   local obj = setmetatable({}, self)
+  obj._val = {}
   obj._range = range
-  obj._val = value or {}
+  if value and type(value) == "table" then
+    for i, v in ipairs(value) do
+      obj[i] = v
+    end
+  end
   return obj
 end
 
-function Array:range()
-  return rawget(self, "_range")
-end
-
-function Array:val()
-  return rawget(self, "_val")
-end
-
 function Array:__index(key)
+  if type(key) == "number" then
+    return rawget(self, "_val")[key]
+  end
   if Array[key] then
     return Array[key]
   end
-  return self:val()[key]
+  return rawget(self, key)
 end
 
-function Array:__tostring() return tostring(self:val()) end
+function Array:__newindex(key, value)
+  if type(key) == "number" then
+    rawget(self, "_val")[key] = value
+    return
+  end
+  rawset(self, key, value)
+end
 
 function Array:__len() return #self:val() end
 
 function Array:__ipairs() return ipairs(self:val()) end
 
 function Array:__pairs() return ipairs(self:val()) end
+
+function Array:val() return self._val end
+
+function Array:range() return self._range end
 
 local parse
 
@@ -227,7 +294,6 @@ local function next_char(str, idx, set, negate)
   return #str + 1
 end
 
-
 local function decode_error(str, idx, msg)
   local line_count = 1
   local col_count = 1
@@ -238,7 +304,6 @@ local function decode_error(str, idx, msg)
       col_count = 1
     end
   end
-  print(debug.traceback())
   error(string.format("%s at line %d col %d", msg, line_count, col_count))
 end
 
@@ -277,7 +342,7 @@ function parse_string0(tvbr, i, max_len)
   local j = i + 1
   local k = j
 
-  while j <= #str and (not max_len or #res < max_len) do
+  while j <= #str and (not max_len or #res + j - k < max_len) do
     local x = str:byte(j)
 
     if x < 32 then
@@ -306,6 +371,9 @@ function parse_string0(tvbr, i, max_len)
     end
 
     j = j + 1
+    if max_len and #res + j - k >= max_len then
+      return res .. str:sub(k, j - 1), j
+    end
   end
 
   decode_error(str, i, "expected closing quote for string")
@@ -317,7 +385,6 @@ local function parse_string(tvbr, i, max_len)
 end
 
 local function parse_number(tvbr, i)
-  print("parse_number(" .. tostring(tvbr) .. ", " .. tostring(i) .. ")")
   local str = tvbr:raw()
   local x = next_char(str, i, delim_chars)
   local s = str:sub(i, x - 1)
@@ -325,7 +392,6 @@ local function parse_number(tvbr, i)
   if not n then
     decode_error(str, i, "invalid number '" .. s .. "'")
   end
-  print("parse_number: " .. s .. " = " .. tostring(n))
   return Value:new(n, tvbr(i - 1, x - i)), x
 end
 
@@ -431,7 +497,6 @@ local char_func_map = {
 
 
 parse = function(tvbr, idx)
-  print("parse(" .. tostring(tvbr) .. ", " .. tostring(idx) .. ")")
   local chr = tvbr(idx - 1, 1):raw()
   if chr == '' then
     decode_error(tvbr, idx, "unexpected end of input")
@@ -443,19 +508,20 @@ parse = function(tvbr, idx)
   decode_error(tvbr, idx, "unexpected character '" .. chr .. "'")
 end
 
-function json_de.decode(tvbr)
+function jsond.decode(tvbr)
   if typename(tvbr) == "Tvb" then
     tvbr = tvbr()
   end
   if typename(tvbr) ~= "TvbRange" then
     error("expected TvbRange, got " .. typename(tvbr))
   end
-  local res, idx = parse(tvbr, next_char(tvbr, 1, space_chars, true))
-  idx = next_char(tvbr, idx, space_chars, true)
-  if idx <= #tvbr then
+  local str = tvbr:raw()
+  local res, idx = parse(tvbr, next_char(str, 1, space_chars, true))
+  idx = next_char(str, idx, space_chars, true)
+  if idx <= tvbr:len() then
     decode_error(tvbr, idx, "trailing garbage")
   end
   return res
 end
 
-return json_de
+return jsond

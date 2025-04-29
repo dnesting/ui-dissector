@@ -6,7 +6,7 @@ ByteArray.__name = "ByteArray"
 function ByteArray.new(str, raw_bytes)
     local self = setmetatable({}, ByteArray)
     self.data = str
-    print("mock: ByteArray.new(" .. str .. ")")
+    --print("mock: ByteArray.new(" .. str .. ")")
     return self
 end
 
@@ -25,7 +25,7 @@ Tvb.__name = "Tvb"
 
 function Tvb.new(data, name)
     local self = setmetatable({}, Tvb)
-    print("mock: Tvb.new(" .. data .. ")")
+    --print("mock: Tvb.new(" .. data .. ")")
     self.data = data
     self.name = name
     return self
@@ -33,14 +33,14 @@ end
 
 local function str_range(s, offset, length)
     local ss = s:sub(offset + 1, offset + length)
-    print("mock: range(" .. s .. ", " .. (offset or "<nil>") .. ", " .. (length or "<nil>") .. ") = " .. ss)
+    --print("mock: range(" .. s .. ", " .. (offset or "<nil>") .. ", " .. (length or "<nil>") .. ") = " .. ss)
     return ss
 end
 
 function Tvb:range(offset, length)
     offset = offset or 0
     length = length or #self.data - offset
-    print("mock: TvbRange(" .. tostring(offset) .. ", " .. tostring(length) .. ")")
+    --print("mock: TvbRange(" .. tostring(offset) .. ", " .. tostring(length) .. ")")
     return TvbRange.new(str_range(self.data, offset, length))
 end
 
@@ -60,7 +60,7 @@ TvbRange.__name = "TvbRange"
 
 function TvbRange.new(subdata)
     local self = setmetatable({}, TvbRange)
-    print("mock: TvbRange.new(" .. subdata .. ")")
+    --print("mock: TvbRange.new(" .. subdata .. ")")
     self.data = subdata
     return self
 end
@@ -82,17 +82,21 @@ end
 function TvbRange:__call(offset, length)
     offset = offset or 0
     length = length or #self.data - offset
-    print("mock: TvbRange(" .. tostring(offset) .. ", " .. tostring(length) .. ")")
+    --print("mock: TvbRange(" .. tostring(offset) .. ", " .. tostring(length) .. ")")
     return TvbRange.new(str_range(self.data, offset, length))
 end
 
 function TvbRange:raw()
-    print("mock: TvbRange:raw() = " .. self.data)
+    --print("mock: TvbRange:raw() = " .. self.data)
     return self.data
 end
 
 function TvbRange:__tostring()
     return "TvbRange(" .. self.data .. ")"
+end
+
+function TvbRange:len()
+    return #self.data
 end
 
 --
@@ -115,7 +119,7 @@ end
 
 --
 
-local jsonde = require "json_de"
+local jsond = require "jsond"
 
 local function make_tvb(str, name)
     return ByteArray.new(str, true):tvb(name)()
@@ -131,48 +135,48 @@ end
 
 local function test_number()
     local tvbr = make_tvb("42")
-    local val = jsonde.decode(tvbr)
+    local val = jsond.decode(tvbr)
     assert_eq(val:val(), 42, "Expected number value")
     assert_eq(val:range():raw(), "42", "Expected raw value")
 end
 
 local function test_string()
     local tvbr = make_tvb('"hello"')
-    local val = jsonde.decode(tvbr)
+    local val = jsond.decode(tvbr)
     assert_eq(val:val(), "hello", "Expected string value")
     assert_eq(val:range():raw(), "hello", "Expected raw value")
 
     tvbr = make_tvb('"hello\\nthere"')
-    val = jsonde.decode(tvbr)
+    val = jsond.decode(tvbr)
     assert_eq(val:val(), "hello\nthere", "Expected string with newline")
     assert_eq(val:range():raw(), "hello\\nthere", "Expected escaped newline")
 
     tvbr = make_tvb('""')
-    val = jsonde.decode(tvbr)
+    val = jsond.decode(tvbr)
     assert_eq(val:val(), "", "Expected empty string value")
     assert_eq(val:range():raw(), '', "Expected raw value for empty string")
 end
 
 local function test_literals()
     local tvbr = make_tvb("true")
-    local val = jsonde.decode(tvbr)
+    local val = jsond.decode(tvbr)
     assert_eq(val:val(), true, "Expected boolean value")
     assert_eq(val:range():raw(), "true", "Expected raw value")
 
     tvbr = make_tvb("false")
-    val = jsonde.decode(tvbr)
+    val = jsond.decode(tvbr)
     assert_eq(val:val(), false, "Expected boolean value")
     assert_eq(val:range():raw(), "false", "Expected raw value")
 
     tvbr = make_tvb("null")
-    val = jsonde.decode(tvbr)
+    val = jsond.decode(tvbr)
     assert_eq(val:val(), nil, "Expected null value")
     assert_eq(val:range():raw(), "null", "Expected raw value")
 end
 
 local function test_array()
     local tvbr = make_tvb("[1, 2, 3]")
-    local val = jsonde.decode(tvbr)
+    local val = jsond.decode(tvbr)
     assert_eq(val:range():raw(), "[1, 2, 3]", "Expected raw value")
 
     local e = val[1]
@@ -191,8 +195,9 @@ end
 
 local function test_object()
     local tvbr = make_tvb('{"key1": "value1", "key2": "value2"}')
-    local val = jsonde.decode(tvbr)
-    assert_eq(val:range():raw(), '{"key1": "value1", "key2": "value2"}', "Expected raw value")
+    local val = jsond.decode(tvbr)
+    local r, _ = val()
+    assert_eq(r:raw(), '{"key1": "value1", "key2": "value2"}', "Expected raw value")
     local e = val.key1
     assert_eq(e:val(), "value1", "Expected value for key1")
     assert_eq(e:range():raw(), 'value1', "Expected raw value for key1")
@@ -228,8 +233,9 @@ local tests = {
 local failed = 0
 
 for _, test in ipairs(tests) do
-    --local status, err = test()
-    local status, err = pcall(test)
+    local status, err
+    status, _ = true, test()
+    --status, err = pcall(test)
     if status then
         print("[PASS]", debug.getinfo(test).name or tostring(test))
     else
