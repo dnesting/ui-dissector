@@ -1,3 +1,5 @@
+-- Copyright (c) 2025 David Nesting
+
 set_plugin_info({
     version = "0.0.1",
     description = "Ubiquiti INFORM Message Dissector",
